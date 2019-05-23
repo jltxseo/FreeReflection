@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import static android.os.Build.VERSION.PREVIEW_SDK_INT;
@@ -25,8 +27,9 @@ public class Reflection {
     static {
         try {
             Method forName = Class.class.getDeclaredMethod("forName", String.class);
+            // 公开API，无问题
             Method getDeclaredMethod = Class.class.getDeclaredMethod("getDeclaredMethod", String.class, Class[].class);
-
+            // 系统类通过反射使用隐藏 API，检查直接通过 正确找到 Method 直接反射调用
             Class<?> vmRuntimeClass = (Class<?>) forName.invoke(null, "dalvik.system.VMRuntime");
             Method getRuntime = (Method) getDeclaredMethod.invoke(vmRuntimeClass, "getRuntime", null);
             setHiddenApiExemptions = (Method) getDeclaredMethod.invoke(vmRuntimeClass, "setHiddenApiExemptions", new Class[]{String[].class});
@@ -46,9 +49,32 @@ public class Reflection {
 
     private static int unsealed = UNKNOWN;
 
+    private static void closeAndroidPDialog(){
+        try {
+            Class aClass = Class.forName("android.content.pm.PackageParser$Package");
+            Constructor declaredConstructor = aClass.getDeclaredConstructor(String.class);
+            declaredConstructor.setAccessible(true);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            Class cls = Class.forName("android.app.ActivityThread");
+            Method declaredMethod = cls.getDeclaredMethod("currentActivityThread");
+            declaredMethod.setAccessible(true);
+            Object activityThread = declaredMethod.invoke(null);
+            Field mHiddenApiWarningShown = cls.getDeclaredField("mHiddenApiWarningShown");
+            mHiddenApiWarningShown.setAccessible(true);
+            mHiddenApiWarningShown.setBoolean(activityThread, true);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     public static int unseal(Context context) {
         if (SDK_INT < 28) {
-            // Below Android P, ignore
+            // Below Android P, ignore targetSdkVersion < 28(p) 则这时候是支持私有api的反射调用，只不过弹出提示
+            // Detected problems with API compatibility对话框，这里面也去掉这对话框
+            closeAndroidPDialog();
             return 0;
         }
 
